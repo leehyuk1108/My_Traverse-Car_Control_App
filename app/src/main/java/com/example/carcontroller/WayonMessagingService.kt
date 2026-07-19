@@ -23,6 +23,7 @@ class WayonMessagingService : FirebaseMessagingService() {
         when (message.data["type"]) {
             "wayon_impact" -> WayonImpactNotifications.show(this, message.data)
             "wayon_door_lock" -> WayonDoorLockNotifications.show(this, message.data)
+            "wayon_parking_unlocked" -> WayonParkingNotifications.show(this, message.data)
         }
     }
 }
@@ -76,7 +77,7 @@ object WayonDoorLockNotifications {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_impact)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(detail)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -87,6 +88,75 @@ object WayonDoorLockNotifications {
             .build()
 
         val notificationId = eventId.hashCode().let { if (it == 0) 9301 else it }
+        (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+            .notify(notificationId, notification)
+    }
+}
+
+object WayonParkingNotifications {
+    private const val CHANNEL_ID = "wayon_parking_alerts"
+
+    fun ensureChannel(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "주차 후 미잠금 알림",
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = "주차 후 차량이 잠기지 않으면 현재 위치와 함께 알려줍니다"
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 250, 150, 450)
+            lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+        }
+        context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    fun show(context: Context, data: Map<String, String>) {
+        ensureChannel(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return
+
+        val eventId = data["vehicleEventId"].orEmpty()
+        val delaySeconds = data["delaySeconds"]?.toIntOrNull()?.coerceAtLeast(0) ?: 180
+        val minutes = maxOf(1, (delaySeconds + 59) / 60)
+        val latitude = data["latitude"]?.toDoubleOrNull()
+        val longitude = data["longitude"]?.toDoubleOrNull()
+        val location = if (latitude != null && longitude != null) {
+            String.format(Locale.KOREA, "%.5f, %.5f", latitude, longitude)
+        } else {
+            "위치 정보 확인 중"
+        }
+        val detail = "차량이 ${minutes}분 동안 잠기지 않았습니다."
+        val body = "$detail\n현재 위치: $location"
+        val title = if (data["test"] == "true") "차량 미잠금 알림 테스트" else "차량이 잠기지 않았습니다"
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("wayonVehicleEventId", eventId)
+            if (latitude != null) putExtra("wayonLatitude", latitude)
+            if (longitude != null) putExtra("wayonLongitude", longitude)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            eventId.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText("${minutes}분간 미잠금 · $location")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setLocalOnly(false)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        val notificationId = eventId.hashCode().let { if (it == 0) 9401 else it }
         (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
             .notify(notificationId, notification)
     }
@@ -142,7 +212,7 @@ object WayonImpactNotifications {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_impact)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(detail)
             .setStyle(NotificationCompat.BigTextStyle().bigText(
