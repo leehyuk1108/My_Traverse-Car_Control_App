@@ -20,8 +20,75 @@ class WayonMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
-        if (message.data["type"] != "wayon_impact") return
-        WayonImpactNotifications.show(this, message.data)
+        when (message.data["type"]) {
+            "wayon_impact" -> WayonImpactNotifications.show(this, message.data)
+            "wayon_door_lock" -> WayonDoorLockNotifications.show(this, message.data)
+        }
+    }
+}
+
+object WayonDoorLockNotifications {
+    private const val CHANNEL_ID = "wayon_door_lock_alerts"
+
+    fun ensureChannel(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "차량 잠금 알림",
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = "차량 잠금이 활성화되거나 해제되면 알려줍니다"
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 180, 120, 280)
+            lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+        }
+        context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    fun show(context: Context, data: Map<String, String>) {
+        ensureChannel(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return
+
+        val locked = data["locked"] == "true"
+        val isTest = data["test"] == "true"
+        val title = when {
+            isTest -> "차량 잠금 알림 테스트"
+            locked -> "차량 잠금 활성화"
+            else -> "차량 잠금 해제"
+        }
+        val detail = if (locked) {
+            "차량 잠금이 활성화되었습니다."
+        } else {
+            "차량 잠금이 해제되었습니다."
+        }
+        val eventId = data["vehicleEventId"].orEmpty()
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("wayonVehicleEventId", eventId)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            eventId.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_impact)
+            .setContentTitle(title)
+            .setContentText(detail)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        val notificationId = eventId.hashCode().let { if (it == 0) 9301 else it }
+        (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+            .notify(notificationId, notification)
     }
 }
 
